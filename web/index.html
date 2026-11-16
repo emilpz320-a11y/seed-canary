@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeedCanary — live monitor</title>
+<style>
+  :root { --bg:#0d0f0a; --panel:#171a11; --line:#2c3220; --ink:#f1f3e8; --dim:#98a083; --ok:#b6e35a; --bad:#ff6b57; --warn:#ffcf5c; --accent:#f5d547; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  header { padding:22px 28px 6px; display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  h1 { margin:0; font-size:26px; letter-spacing:.3px; } h1 span { color:var(--accent); }
+  header p { margin:0; color:var(--dim); }
+  main { padding:10px 28px 28px; display:grid; gap:14px; max-width:1240px; }
+  #banner { border-radius:12px; padding:14px 18px; font-size:19px; font-weight:700; letter-spacing:.3px; border:1px solid var(--line); background:var(--panel); }
+  #banner.armed { color:var(--ok); border-color:#3d4d1c; } #banner.tripped { color:var(--bad); border-color:#5a2a22; background:#22120f; }
+  #banner small { display:block; font-weight:500; font-size:14px; color:var(--dim); margin-top:2px; }
+  .cards { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .box h2 { margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); font-weight:600; }
+  .box b { font-size:17px; } .big { font:600 26px ui-monospace, Consolas, monospace; margin:6px 0 2px; }
+  .box small { display:block; color:var(--dim); overflow-wrap:anywhere; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size:13px; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.6px; margin-left:8px; vertical-align:middle; }
+  .pill.ok { background:#26330f; color:var(--ok); } .pill.bad { background:#451d17; color:var(--bad); } .pill.wait { background:#40351a; color:var(--warn); }
+  ol { list-style:none; margin:0; padding:0; }
+  li { display:grid; grid-template-columns: 74px 1fr auto; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); align-items:baseline; }
+  li:last-child { border-bottom:0; }
+  li time { color:var(--dim); font:13px ui-monospace, Consolas, monospace; }
+  li.alarm span { color:var(--bad); font-weight:600; } li.safe span { color:var(--ok); font-weight:600; }
+  #status { color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Seed<span>Canary</span></h1>
+  <p>A bait address from your seed that must never move. If it does, your seed leaked, and your vault escapes to cold storage by itself.</p>
+</header>
+<main>
+  <div id="banner" class="armed">Loading…</div>
+  <section class="cards">
+    <div class="box"><h2>Canary · Base Sepolia</h2><b>Bait holder</b><span id="canaryPill"></span><div class="big" id="baitBal">…</div><small id="canaryAddr"></small></div>
+    <div class="box"><h2>Escape vault · Base Sepolia</h2><b>Your savings</b><span id="vaultPill"></span><div class="big" id="vaultBal">…</div><small id="vaultAddr"></small><small id="pending"></small></div>
+    <div class="box"><h2>Cold wallet · another seed</h2><b>Escape route</b><div class="big" id="coldBal">…</div><small id="coldAddr"></small></div>
+  </section>
+  <section class="box">
+    <h2>What happened (each line is a real transaction)</h2>
+    <ol id="timeline"><li><time></time><span>Loading…</span></li></ol>
+  </section>
+  <div id="status"></div>
+</main>
+<script type="module">
+const BASE_RPC = 'https://sepolia.base.org';
+const LASNA_RPC = 'https://lasna-rpc.rnk.dev/';
+const BASE_SCAN = 'https://sepolia.basescan.org';
+const REACT_SCAN = 'https://lasna.reactscan.net';
+const SEL = { evacuated: '0xccf6b3aa', pendingTo: '0xc1838ebb', pendingAmount: '0xba1066ed', pendingReadyAt: '0xf565c5d0', balanceOf: '0x70a08231' };
+const TRIPPED_TOPIC = '0x380450985be8ed55a195ab749259e8ae7121ec3aceb92c93a5f5bba5f94a5d7b';
+// deployments.json key -> timeline line. Public Base Sepolia RPCs cap eth_getLogs at 200 blocks, so the
+// timeline is built from the receipts of the transactions the demo script recorded.
+const STEPS = {
+  spendRequestTx: ['', 'Owner queues an ordinary 0.0002 ETH payment (time-locked)'],
+  spendExecuteTx: ['', 'Time-lock over: the payment goes through'],
+  thiefQueueTx: ['alarm', 'Seed leaked: the thief queues a withdrawal of everything with the owner key'],
+  baitSweepTx: ['alarm', 'The thief sweeps the bait from the canary address'],
+  evacuationTx: ['safe', 'Reactive callback: the vault evacuates to the cold wallet'],
+};
+const $ = (id) => document.getElementById(id);
+let rpcId = 0;
+async function rpc(url, method, params) {
+  const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }) });
+  const body = await res.json();
+  if (body.error) throw new Error(`${method}: ${body.error.message}`);
+  return body.result;
+}
+const call = (to, data) => rpc(BASE_RPC, 'eth_call', [{ to, data }, 'latest']);
+const eth = (wei) => (Number(wei) / 1e18).toLocaleString('en-US', { maximumFractionDigits: 6 });
+const addrLink = (scan, a) => `<a class="mono" href="${scan}/address/${a}" target="_blank" rel="noopener">${a}</a>`;
+const receipts = new Map();
+
+async function receiptOf(hash) {
+  if (receipts.has(hash)) return receipts.get(hash);
+  const receipt = await rpc(BASE_RPC, 'eth_getTransactionReceipt', [hash]).catch(() => null);
+  if (!receipt) return null;
+  const block = await rpc(BASE_RPC, 'eth_getBlockByHash', [receipt.blockHash, false]);
+  receipt.timestamp = Number(BigInt(block.timestamp));
+  receipts.set(hash, receipt);
+  return receipt;
+}
+
+async function trippedTx(dep) {
+  const receipt = await rpc(LASNA_RPC, 'eth_getTransactionReceipt', [dep.watcherDeployTx]);
+  const logs = await rpc(LASNA_RPC, 'eth_getLogs', [{ address: dep.watcher, fromBlock: receipt.blockNumber, toBlock: 'latest', topics: [TRIPPED_TOPIC] }]);
+  return logs.length ? logs[0].transactionHash : null;
+}
+
+async function refresh() {
+  const dep = await (await fetch('../deployments.json', { cache: 'no-store' })).json();
+  $('canaryAddr').innerHTML = addrLink(BASE_SCAN, dep.canary);
+  $('vaultAddr').innerHTML = addrLink(BASE_SCAN, dep.vault);
+  $('coldAddr').innerHTML = addrLink(BASE_SCAN, dep.coldWallet);
+  const pad = (a) => a.slice(2).toLowerCase().padStart(64, '0');
+  const [bait, vaultBal, coldBal, evacuated, pendingTo, pendingAmount, pendingReadyAt, head, reactTx] = await Promise.all([
+    call(dep.bait, SEL.balanceOf + pad(dep.canary)),
+    rpc(BASE_RPC, 'eth_getBalance', [dep.vault, 'latest']),
+    rpc(BASE_RPC, 'eth_getBalance', [dep.coldWallet, 'latest']),
+    call(dep.vault, SEL.evacuated),
+    call(dep.vault, SEL.pendingTo),
+    call(dep.vault, SEL.pendingAmount),
+    call(dep.vault, SEL.pendingReadyAt),
+    rpc(BASE_RPC, 'eth_getBlockByNumber', ['latest', false]),
+    trippedTx(dep).catch(() => null),
+  ]);
+  const now = Number(BigInt(head.timestamp));
+  const baitLeft = BigInt(bait);
+  const isOut = BigInt(evacuated) === 1n;
+  $('baitBal').textContent = `${eth(baitLeft)} BAIT`;
+  $('canaryPill').outerHTML = `<span id="canaryPill" class="pill ${baitLeft > 0n ? 'ok' : 'bad'}">${baitLeft > 0n ? 'UNTOUCHED' : 'MOVED'}</span>`;
+  $('vaultBal').textContent = `${eth(BigInt(vaultBal))} ETH`;
+  $('vaultPill').outerHTML = `<span id="vaultPill" class="pill ${isOut ? 'bad' : 'ok'}">${isOut ? 'EVACUATED' : 'ARMED'}</span>`;
+  $('coldBal').textContent = `${eth(BigInt(coldBal))} ETH`;
+  const hasPending = BigInt(pendingTo) !== 0n;
+  const left = Number(BigInt(pendingReadyAt)) - now;
+  $('pending').textContent = hasPending ? `pending withdrawal: ${eth(BigInt(pendingAmount))} ETH to 0x${pendingTo.slice(26, 32)}… · ${left > 0 ? `time-lock ${left}s` : 'ready'}` : 'no pending withdrawal';
+
+  const lines = [];
+  for (const [key, [cls, text]] of Object.entries(STEPS)) {
+    if (!dep[key]) continue;
+    const receipt = await receiptOf(dep[key]);
+    if (!receipt) continue;
+    lines.push({ cls, text, at: receipt.timestamp, link: `<a href="${BASE_SCAN}/tx/${dep[key]}" target="_blank" rel="noopener">Base Sepolia tx</a>`, key });
+  }
+  lines.sort((a, b) => a.at - b.at);
+  const sweep = lines.find((l) => l.key === 'baitSweepTx');
+  const out = lines.find((l) => l.key === 'evacuationTx');
+  if (sweep && reactTx) lines.splice(lines.indexOf(sweep) + 1, 0, { cls: 'alarm', text: 'Reactive Lasna: CanaryWatcher.react() sees the Transfer and requests evacuate()', at: sweep.at, link: `<a href="${REACT_SCAN}/tx/${reactTx}" target="_blank" rel="noopener">Lasna tx</a>` });
+  if (out && sweep) out.text += ` — ${out.at - sweep.at} s after the bait moved`;
+  if (dep.thiefExecuteBlocked) lines.push({ cls: 'safe', text: 'The thief comes back for the queued withdrawal: executeWithdraw() reverts, nothing left to take', at: null, link: '' });
+  const t0 = lines.length ? lines[0].at : 0;
+  $('timeline').innerHTML = lines.map((l) => `<li class="${l.cls}"><time>${l.at === null ? '' : '+' + (l.at - t0) + ' s'}</time><span>${l.text}</span>${l.link}</li>`).join('') || '<li><time></time><span>Nothing yet: the canary is armed and quiet.</span></li>';
+
+  const banner = $('banner');
+  if (isOut) {
+    banner.className = 'tripped';
+    banner.innerHTML = `CANARY TRIPPED — the vault escaped to cold storage${out && sweep ? ` ${out.at - sweep.at} s after the bait moved` : ''}<small>The seed is burned. The thief got the bait and nothing else.</small>`;
+  } else {
+    banner.className = 'armed';
+    banner.innerHTML = 'ARMED — the canary is quiet<small>CanaryWatcher on Reactive Lasna is subscribed to every Transfer and Approval signed by the canary.</small>';
+  }
+  $('status').textContent = `Base Sepolia block ${Number(BigInt(head.number))} · refreshed ${new Date().toLocaleTimeString()}`;
+}
+
+const tick = () => refresh().catch((err) => { $('status').textContent = `RPC error: ${err.message}`; });
+await tick();
+setInterval(tick, 2500);
+</script>
+</body>
+</html>

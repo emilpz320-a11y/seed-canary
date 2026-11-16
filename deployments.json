@@ -1,0 +1,23 @@
+{
+  "faucetTx": "0x4c465e0c12c6b097f3141a05776a0981523ce1d63aa5f73644e5ea72e52b840e",
+  "canary": "0xEF96DD4589B851250DE58fFeAdA329Df4d2F64fE",
+  "coldWallet": "0x9f59D3b17BBE5b706bb16B9e27406eb8Cbc1C077",
+  "watcher": "0x2bafc7c50481509ac8d3844060bf9400e14d321a",
+  "watcherDeployTx": "0x467f923a5249cb8b5891ca4985be53fa6ac3b28b28a952c71370df3c45e6f021",
+  "bait": "0x42401a1bab5b72c970fe2a892f20a2ccd60cf732",
+  "baitDeployTx": "0x4288c61190d786cb1c3736caddda3dea1d40c234736218f89c8ca3fb943fa234",
+  "vault": "0xf3ccb8cf45cb1aff6bddffd6159083ccf739e53b",
+  "vaultDeployTx": "0xfb45ba3b54450e73473b7a36294b797fc8b53ba656dd559b11b69d120289b66d",
+  "callbackDepositTx": "0xcdb02e326f9e00ac3499ee801669177237101c58dc0dfa690221aeda6ca6a7b4",
+  "armTx": "0xd6ee06a1793e8ea8e639e91d7fb0995c95f6a8fff60e1b4302cda1320ad2f304",
+  "protectTx": "0xabb4a07bd742a89c3f015ea4e4d5b63f3118b5355369b4c4414bb6bb07eb0111",
+  "spendRequestTx": "0x40380710c152e76a4f294352424c865e814dc1815e8cad58dc95d5dbe856e112",
+  "spendExecuteTx": "0xf61f03df5ba005188836d2ebac0a3cb4b67e3a4228fe5ef31d687f82ff09f881",
+  "thiefQueueTx": "0x205cc159b38c6483def6b4f5671df7cebd9eab148dd9e9b71a36f168edd505d1",
+  "baitSweepTx": "0x6bea180ddc820703466d544504f548ee2a40d28f2fad789f5f23e42aa9d969b8",
+  "evacuationTx": "0x4cea83814be11de2c963ad98d46719b9bb41eb6c7c9ea50993c5577d047e6600",
+  "evacuationLatencySeconds": "1",
+  "coldWalletBalance": "0.0018",
+  "thiefExecuteBlocked": "executeWithdraw() reverts with NothingPending: the queued withdrawal died with the evacuation",
+  "trippedTx": "0xbe7c8830d193923d06427c1a1735bc2052ca75bd74e71de197da6230f4da25cb"
+}
